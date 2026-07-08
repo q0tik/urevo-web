@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cadence — Urevo</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Archivo+Expanded:wght@700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    color-scheme: dark;
+    --ground:#080C11;
+    --panel:#101820;
+    --panel2:#16212C;
+    --line:#233240;
+    --line-soft:#1a2732;
+    --ink:#EAF3F9;
+    --dim:#7A8CA0;
+    --dim2:#556575;
+    --go:#26E7B4;          /* движение / прогресс */
+    --go-deep:#0EB98E;
+    --pause:#FFC24B;       /* пауза */
+    --stop:#FF5F5B;        /* стоп */
+    --disp:'Archivo Expanded', 'Archivo', system-ui, sans-serif;
+    --ui:'Archivo', system-ui, -apple-system, sans-serif;
+    --mono:'Space Mono', ui-monospace, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--ui); color:var(--ink); min-height:100dvh;
+    background:
+      radial-gradient(120% 60% at 50% -10%, #123 0%, rgba(18,34,51,0) 60%),
+      var(--ground);
+    padding:18px 16px 48px; max-width:520px; margin:0 auto;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* очень слабая «дорожка»-текстура фона */
+  body::before{
+    content:''; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(90deg, rgba(255,255,255,.014) 0 1px, transparent 1px 34px);
+  }
+
+  /* ---------- Топбар ---------- */
+  .top{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px}
+  .brand{display:flex; align-items:center; gap:11px; min-width:0}
+  .status-dot{width:11px; height:11px; border-radius:50%; background:var(--dim2); flex:0 0 auto; position:relative}
+  .status-dot.moving{background:var(--go); box-shadow:0 0 0 0 rgba(38,231,180,.55); animation:pulse 1.7s infinite}
+  .status-dot.paused{background:var(--pause)}
+  .status-dot.stopped{background:var(--dim)}
+  .status-dot.off{background:var(--stop); opacity:.7}
+  @keyframes pulse{to{box-shadow:0 0 0 12px rgba(38,231,180,0)}}
+  .wordmark{font-family:var(--disp); font-weight:900; font-size:19px; letter-spacing:.14em; text-transform:uppercase}
+  .state-word{font-family:var(--mono); font-size:11px; color:var(--dim); letter-spacing:.12em; text-transform:uppercase}
+  .btn{font-family:var(--ui); font-weight:700; border:1px solid var(--line); background:var(--panel2);
+       color:var(--ink); border-radius:12px; padding:12px 18px; cursor:pointer; font-size:15px;
+       transition:transform .05s, background .15s, border-color .15s}
+  .btn:active{transform:translateY(1px)}
+  .btn:focus-visible{outline:2px solid var(--go); outline-offset:2px}
+  .btn[disabled]{opacity:.4; cursor:default}
+  .btn.cta{background:var(--go); border-color:var(--go); color:#03130E}
+  .btn.cta.off{background:var(--panel2); border-color:var(--line); color:var(--ink)}
+
+  /* ---------- Герой: шаги + лента темпа ---------- */
+  .hero{margin-bottom:14px}
+  .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.24em; text-transform:uppercase; color:var(--dim)}
+  .steps{font-family:var(--disp); font-weight:900; font-size:clamp(66px, 22vw, 104px); line-height:.92;
+         letter-spacing:-.01em; font-variant-numeric:tabular-nums; margin:6px 0 2px}
+  .steps .unit{font-size:.26em; color:var(--dim); letter-spacing:.1em; margin-left:.35em; vertical-align:.5em}
+
+  /* лента темпа — сигнатурный элемент */
+  .track{position:relative; height:52px; margin-top:16px; border-radius:14px;
+          background:linear-gradient(180deg,#0b141b,#0d1822); border:1px solid var(--line-soft);
+          overflow:hidden}
+  .track .lane{position:absolute; inset:0;
+    background:repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(255,255,255,.05) calc(10% - 2px) 10%);}
+  .track .fill{position:absolute; top:0; bottom:0; left:0; width:0%;
+    background:linear-gradient(90deg, rgba(14,185,142,.25), rgba(38,231,180,.42));
+    border-right:2px solid var(--go); transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  .track.moving .fill::after{content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(90deg, transparent 0 22px, rgba(38,231,180,.16) 22px 24px);
+    animation:belt 1.1s linear infinite}
+  @keyframes belt{to{background-position:24px 0}}
+  .track .marker{position:absolute; top:50%; left:0%; width:16px; height:16px; margin:-8px 0 0 -8px;
+    border-radius:50%; background:var(--go); box-shadow:0 0 0 4px rgba(38,231,180,.18), 0 2px 10px rgba(0,0,0,.5);
+    transition:left .6s cubic-bezier(.2,.7,.2,1)}
+  .track .finish{position:absolute; top:0; bottom:0; right:0; width:8px;
+    background:repeating-linear-gradient(0deg,#e9f6f2 0 6px, #0d1822 6px 12px); opacity:.55}
+  .goalline{display:flex; justify-content:space-between; align-items:baseline; margin-top:11px;
+            font-family:var(--mono); font-size:12.5px; color:var(--dim)}
+  .goalline .pct{color:var(--go); font-weight:700}
+  .goalline.done .pct{color:var(--go)}
+
+  /* ---------- Телеметрия ---------- */
+  .telemetry{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; margin:16px 0 20px;
+             background:var(--line-soft); border:1px solid var(--line-soft); border-radius:14px; overflow:hidden}
+  .cell{background:var(--panel); padding:13px 12px}
+  .cell .k{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim2)}
+  .cell .v{font-family:var(--mono); font-weight:700; font-size:19px; margin-top:5px; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .cell .v small{font-size:11px; color:var(--dim); font-weight:400}
+
+  /* ---------- Панели управления ---------- */
+  .panel{background:var(--panel); border:1px solid var(--line-soft); border-radius:16px; padding:16px; margin-bottom:12px}
+  .panel > h2{font-family:var(--mono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--dim);
+              margin:0 0 14px; display:flex; align-items:center; justify-content:space-between}
+  .panel > h2 .now{font-family:var(--disp); font-weight:800; font-size:15px; color:var(--ink); letter-spacing:0}
+
+  .stepper{display:flex; align-items:center; justify-content:center; gap:14px}
+  .knob{width:60px; height:60px; border-radius:18px; font-size:28px; font-weight:700; display:flex;
+        align-items:center; justify-content:center; padding:0}
+  .bigval{font-family:var(--disp); font-weight:900; font-size:46px; font-variant-numeric:tabular-nums;
+          min-width:150px; text-align:center; line-height:1}
+  .bigval small{font-family:var(--mono); font-size:14px; color:var(--dim); font-weight:400; margin-left:4px}
+
+  input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:6px;
+    background:linear-gradient(90deg,var(--go-deep),var(--go)); margin:18px 0 4px; cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:26px; height:26px; border-radius:50%;
+    background:#fff; border:4px solid var(--go); box-shadow:0 2px 8px rgba(0,0,0,.5); cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:22px; height:22px; border-radius:50%; background:#fff; border:4px solid var(--go)}
+
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px}
+  .chip{flex:1; min-width:46px; text-align:center; border:1px solid var(--line); background:var(--panel2);
+        border-radius:11px; padding:11px 6px; cursor:pointer; font-weight:700; font-size:15px; font-variant-numeric:tabular-nums;
+        transition:transform .05s, border-color .15s, background .15s}
+  .chip:active{transform:translateY(1px)}
+  .chip:focus-visible{outline:2px solid var(--go); outline-offset:2px}
+
+  .actions{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px}
+  .actions .btn{width:100%; text-align:center}
+  .btn.pause{border-color:#4a3c18; color:var(--pause)}
+  .btn.pause.active{background:var(--pause); border-color:var(--pause); color:#241800}
+  .btn.stop{border-color:#4a1f1e; color:var(--stop)}
+  .btn.slow{grid-column:1 / -1; border-color:var(--go-deep); color:var(--go)}
+
+  .warn{margin-top:14px; font-family:var(--mono); font-size:11.5px; line-height:1.5; color:#c9a86a;
+        background:rgba(255,194,75,.06); border:1px solid rgba(255,194,75,.18); border-radius:10px; padding:9px 11px}
+  .ctrl-status{margin-top:10px; font-family:var(--mono); font-size:12px; color:var(--dim)}
+  .ctrl-status.ok{color:var(--go)} .ctrl-status.bad{color:var(--stop)}
+
+  /* Заминка — конфиг */
+  .config{font-size:15px; line-height:2.1; color:var(--dim)}
+  .config .num{font-family:var(--mono); font-weight:700; font-size:15px; color:var(--ink);
+    background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:6px 4px; width:58px;
+    text-align:center; margin:0 3px}
+  .config .num:focus-visible{outline:2px solid var(--go); outline-offset:1px}
+  .sd-status{margin-top:12px; font-family:var(--mono); font-size:12.5px; color:var(--go); min-height:1em}
+
+  /* Цель — быстрый ввод */
+  .goalset{display:flex; gap:8px; margin-bottom:12px}
+  .goalset input{flex:1; font-family:var(--mono); background:var(--panel2); border:1px solid var(--line);
+    color:var(--ink); border-radius:11px; padding:12px 14px; font-size:15px}
+  .goalset input:focus-visible{outline:2px solid var(--go); outline-offset:1px}
+  .autoslow{display:flex; align-items:center; gap:10px; margin-top:14px; color:var(--dim); font-size:14px; cursor:pointer}
+  .autoslow input{width:20px; height:20px; accent-color:var(--go)}
+
+  /* Интервалы */
+  .ivrow{display:flex; align-items:center; gap:7px; margin-bottom:9px; font-family:var(--mono); font-size:12.5px; color:var(--dim)}
+  .ivrow .num{width:50px; margin:0}
+  .ivrow .idx{width:20px; color:var(--dim2); flex:0 0 auto}
+  .ivrow .rm{margin-left:auto; border:1px solid var(--line); background:var(--panel2); color:var(--stop);
+    border-radius:9px; width:34px; height:34px; cursor:pointer; font-size:16px; flex:0 0 auto}
+  .ivrow .rm:active{transform:translateY(1px)}
+  /* История */
+  .hist{margin-top:14px}
+  .hist .row{display:flex; justify-content:space-between; gap:10px; font-family:var(--mono); font-size:12.5px;
+    color:var(--dim); padding:8px 0; border-top:1px solid var(--line-soft)}
+  .hist .row b{color:var(--ink); font-weight:700}
+  .hist .empty{font-family:var(--mono); font-size:12.5px; color:var(--dim2)}
+
+  .foot{font-family:var(--mono); font-size:11px; color:var(--dim2); line-height:1.6; margin-top:22px; text-align:center}
+
+  /* Тост */
+  #toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(24px);
+    background:#0d1620; border:1px solid var(--line); color:var(--ink); padding:15px 20px; border-radius:14px;
+    box-shadow:0 14px 50px rgba(0,0,0,.6); opacity:0; pointer-events:none; transition:.28s cubic-bezier(.2,.8,.2,1);
+    max-width:88vw; text-align:center; font-weight:600; z-index:50}
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  #toast.good{border-color:var(--go); background:#082018}
+
+  .dim-when-off{transition:opacity .3s}
+  body:not(.connected) .dim-when-off{opacity:.5}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important; transition:none !important}
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">
+      <span class="status-dot off" id="dot"></span>
+      <div>
+        <div class="wordmark">Cadence</div>
+        <div class="state-word" id="stateWord">не подключено</div>
+      </div>
+    </div>
+    <button id="conn" class="btn cta">Подключить</button>
+  </div>
+
+  <!-- Герой -->
+  <section class="hero">
+    <div class="eyebrow">Шаги · сессия</div>
+    <div class="steps" id="steps">0<span class="unit">шагов</span></div>
+    <div class="track" id="track">
+      <div class="lane"></div>
+      <div class="fill" id="trackFill"></div>
+      <div class="finish"></div>
+      <div class="marker" id="trackMarker"></div>
+    </div>
+    <div class="goalline" id="goalLine"><span id="goalTxt">Цель не задана — задайте ниже</span><span class="pct" id="goalPct"></span></div>
+  </section>
+
+  <!-- Телеметрия -->
+  <div class="telemetry dim-when-off">
+    <div class="cell"><div class="k">Скорость</div><div class="v" id="speed">—<small></small></div></div>
+    <div class="cell"><div class="k">Дистанция</div><div class="v" id="dist">—</div></div>
+    <div class="cell"><div class="k">Время</div><div class="v" id="time">—</div></div>
+    <div class="cell"><div class="k">Ккал</div><div class="v" id="kcal">—</div></div>
+  </div>
+
+  <!-- Цель по шагам -->
+  <div class="panel">
+    <h2>Цель по шагам</h2>
+    <div class="goalset">
+      <input type="number" id="goalInput" placeholder="напр. 8000" min="1" step="100" inputmode="numeric">
+      <button id="setGoal" class="btn">Задать</button>
+      <button id="clrGoal" class="btn">Сброс</button>
+    </div>
+    <div class="chips">
+      <span class="chip" data-g="4000">4k</span><span class="chip" data-g="6000">6k</span>
+      <span class="chip" data-g="8000">8k</span><span class="chip" data-g="10000">10k</span>
+      <span class="chip" data-g="15000">15k</span>
+    </div>
+    <label class="autoslow"><input type="checkbox" id="autoSlow"> При достижении цели — запустить заминку</label>
+  </div>
+
+  <!-- Скорость -->
+  <div class="panel dim-when-off">
+    <h2>Скорость <span class="now" id="spdNow">—</span></h2>
+    <div class="stepper">
+      <button class="btn knob" id="spdDown" aria-label="Медленнее">−</button>
+      <div class="bigval"><span id="tgt">—</span><small>км/ч</small></div>
+      <button class="btn knob" id="spdUp" aria-label="Быстрее">+</button>
+    </div>
+    <input type="range" id="spdRange" min="1" max="6" step="0.1" value="3">
+    <div class="chips">
+      <span class="chip" data-s="2">2</span><span class="chip" data-s="3">3</span>
+      <span class="chip" data-s="4">4</span><span class="chip" data-s="5">5</span><span class="chip" data-s="6">6</span>
+    </div>
+    <div class="actions">
+      <button id="pauseBtn" class="btn pause">Пауза</button>
+      <button id="stopBtn" class="btn stop">Стоп</button>
+      <button id="slowBtn" class="btn slow">Запустить заминку</button>
+    </div>
+    <div class="warn">Кнопки двигают ленту. Держись за поручень и будь готов сойти. Первую команду дорожка подтверждает.</div>
+    <div class="ctrl-status" id="ctrlStatus">Управление не активировано.</div>
+  </div>
+
+  <!-- Наклон -->
+  <div class="panel dim-when-off">
+    <h2>Наклон <span class="now" id="inclNow">—</span></h2>
+    <div class="stepper">
+      <button class="btn knob" id="inclDown" aria-label="Ниже">−</button>
+      <div class="bigval"><span id="tgtIncl">—</span><small>%</small></div>
+      <button class="btn knob" id="inclUp" aria-label="Выше">+</button>
+    </div>
+    <div class="chips">
+      <span class="chip" data-i="0">0</span><span class="chip" data-i="3">3</span>
+      <span class="chip" data-i="6">6</span><span class="chip" data-i="9">9</span>
+    </div>
+  </div>
+
+  <!-- Заминка -->
+  <div class="panel">
+    <h2>Заминка на финише</h2>
+    <div class="config">
+      Снижать на <input class="num" id="sdPct" type="number" min="5" max="90" step="5" value="20"> %
+      каждые <input class="num" id="sdEvery" type="number" min="0.25" max="10" step="0.25" value="1"> мин,
+      ниже <input class="num" id="sdFloor" type="number" min="1" max="5" step="0.5" value="1"> км/ч — остановить.
+    </div>
+    <div class="sd-status" id="sdStatus"></div>
+  </div>
+
+  <!-- Интервальная программа -->
+  <div class="panel">
+    <h2>Интервальная программа <span class="now" id="ivStat"></span></h2>
+    <div id="ivRows"></div>
+    <button id="ivAdd" class="btn" style="width:100%; margin-top:4px">+ Интервал</button>
+    <div class="config" style="margin-top:14px">Повторить <input class="num" id="ivReps" type="number" min="1" max="30" step="1" value="1"> раз</div>
+    <button id="ivStart" class="btn slow" style="width:100%; margin-top:14px">Запустить программу</button>
+    <div class="sd-status" id="ivStatus"></div>
+  </div>
+
+  <!-- Сегодня и история -->
+  <div class="panel">
+    <h2>Сегодня <span class="now" id="todayNow">0 шагов</span></h2>
+    <div class="track" style="height:16px">
+      <div class="fill" id="dayFill"></div>
+      <div class="finish"></div>
+    </div>
+    <div class="goalline"><span id="dayGoalTxt">Дневная цель не задана</span><span class="pct" id="dayPct"></span></div>
+    <div class="goalset" style="margin-top:14px">
+      <input type="number" id="dayGoalInput" placeholder="дневная цель, напр. 8000" min="0" step="500" inputmode="numeric">
+      <button id="dayGoalSet" class="btn">Задать</button>
+    </div>
+    <div class="hist" id="history"></div>
+  </div>
+
+  <p class="foot">Chrome / Arc на десктопе или Android · дорожка включена и не подключена к родному приложению</p>
+  <div id="toast"></div>
+
+<script>
+"use strict";
+// ==== Константы FTMS ==========================================================
+const FTMS = 0x1826, DEVINFO = 0x180a;
+const CH_TREADMILL = 0x2acd;   // notify — телеметрия
+const CH_CONTROL   = 0x2ad9;   // write+indicate — Control Point
+const OP = { REQUEST:0x00, RESET:0x01, SET_SPEED:0x02, SET_INCL:0x03, START:0x07, STOP:0x08 };
+const STOP_PAUSE = 0x02, STOP_STOP = 0x01;
+
+const $ = id => document.getElementById(id);
+
+// ==== Состояние ===============================================================
+let device=null, server=null, ctrlChar=null, wakeLock=null;
+let controlGranted=false, slowdownTimer=null;
+let hasCommanded=false, hasInclCmd=false, paused=false;
+let goal = Number(localStorage.getItem('goal')||0) || null;
+let goalReached=false, lastSteps=null, lastSpeed=0;
+let commandedSpeed = 3.0, commandedIncl = 0;
+// сессия / день / история / интервалы
+let sess = { baseSteps:null, prevSteps:null, steps:0, baseDist:null, dist:0, baseSec:null, sec:0, baseKcal:null, kcal:0 };
+const safeParse = (s,d) => { try{ return s? JSON.parse(s): d; }catch(e){ return d; } };
+const today = () => new Date().toISOString().slice(0,10);
+let daily = safeParse(localStorage.getItem('daily'), {});
+let sessions = safeParse(localStorage.getItem('sessions'), []);
+let dayGoal = Number(localStorage.getItem('dayGoal')||0) || null;
+let ivProgram = safeParse(localStorage.getItem('ivProgram'), [{min:3,spd:3,incl:0},{min:1,spd:5,incl:0}]);
+let ivTimer=null, ivTick=null;
+
+// ==== Разбор Treadmill Data (динамически по флагам) ===========================
+function parseTreadmill(dv){
+  let i=0; const f=dv.getUint16(i,true); i+=2;
+  const o={};
+  o.speed = dv.getUint16(i,true)/100; i+=2;
+  if(f&0x0002){ o.avgSpeed=dv.getUint16(i,true)/100; i+=2; }
+  if(f&0x0004){ o.dist = dv.getUint8(i)|(dv.getUint8(i+1)<<8)|(dv.getUint8(i+2)<<16); i+=3; }
+  if(f&0x0008){ o.incl=dv.getInt16(i,true)/10; i+=2; o.ramp=dv.getInt16(i,true)/10; i+=2; }
+  if(f&0x0010){ i+=4; }
+  if(f&0x0020){ i+=2; }
+  if(f&0x0040){ i+=2; }
+  if(f&0x0080){ o.kcal=dv.getUint16(i,true); i+=2; i+=2; i+=1; }
+  if(f&0x0100){ o.hr=dv.getUint8(i); i+=1; }
+  if(f&0x0200){ i+=1; }
+  if(f&0x0400){ o.elapsed=dv.getUint16(i,true); i+=2; }
+  if(f&0x0800){ i+=2; }
+  if(dv.byteLength - i >= 2){ o.steps = dv.getUint16(i,true); }
+  return o;
+}
+
+// ==== Рендер ==================================================================
+function fmtTime(s){ if(s==null) return '—'; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), ss=s%60;
+  return h? `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}` : `${m}:${String(ss).padStart(2,'0')}`; }
+function fmtSteps(n){ return n.toLocaleString('ru'); }
+
+function render(d){
+  if(d.steps!=null){
+    let backfill=0;
+    if(sess.baseSteps==null){                 // первая телеметрия за подключение — учесть уже пройденное в этой тренировке
+      sess.baseSteps=d.steps; sess.prevSteps=d.steps; backfill=d.steps;
+    } else if(d.steps<sess.prevSteps){        // счётчик дорожки сбросился (новая тренировка) — новый базис, без бэкфилла
+      sess.baseSteps=d.steps; sess.prevSteps=d.steps;
+    }
+    const inc=Math.max(0, d.steps-sess.prevSteps); sess.prevSteps=d.steps;
+    sess.steps=Math.max(0, d.steps-sess.baseSteps);
+    const add=backfill+inc;
+    if(add>0){ daily[today()]=(daily[today()]||0)+add; localStorage.setItem('daily', JSON.stringify(daily)); renderDay(); }
+    lastSteps=d.steps; $('steps').innerHTML = fmtSteps(d.steps)+'<span class="unit">шагов</span>'; renderGoal(); checkGoal(d.steps);
+  }
+  if(d.speed!=null){
+    lastSpeed=d.speed;
+    $('speed').innerHTML = d.speed.toFixed(1)+'<small> км/ч</small>';
+    $('spdNow').textContent = d.speed.toFixed(1)+' км/ч';
+    if(!hasCommanded && d.speed>0){ commandedSpeed = clamp(round1(d.speed),1,6); updateTgt(); }
+    updateState();
+  }
+  if(d.dist!=null){ if(sess.baseDist==null||d.dist<sess.baseDist) sess.baseDist=d.dist; sess.dist=Math.max(0,d.dist-sess.baseDist);
+    $('dist').innerHTML = d.dist>=1000? (d.dist/1000).toFixed(2)+'<small> км</small>' : d.dist+'<small> м</small>'; }
+  if(d.elapsed!=null){ if(sess.baseSec==null||d.elapsed<sess.baseSec) sess.baseSec=d.elapsed; sess.sec=Math.max(0,d.elapsed-sess.baseSec);
+    $('time').textContent = fmtTime(d.elapsed); }
+  if(d.kcal!=null){ if(sess.baseKcal==null||d.kcal<sess.baseKcal) sess.baseKcal=d.kcal; sess.kcal=Math.max(0,d.kcal-sess.baseKcal);
+    $('kcal').textContent = d.kcal; }
+  if(d.incl!=null){
+    $('inclNow').textContent = d.incl.toFixed(0)+'%';
+    if(!hasInclCmd){ commandedIncl = clamp(Math.round(d.incl),0,9); updateInclTgt(); }
+  }
+}
+
+function renderGoal(){
+  const cur=lastSteps||0;
+  if(!goal){
+    $('goalTxt').textContent='Цель не задана — задайте ниже'; $('goalPct').textContent='';
+    $('trackFill').style.width='0%'; $('trackMarker').style.left='0%'; $('goalLine').classList.remove('done');
+    return;
+  }
+  const pct=Math.min(100, cur/goal*100);
+  $('goalTxt').textContent = `Цель ${fmtSteps(goal)} · осталось ${fmtSteps(Math.max(0,goal-cur))}`;
+  $('goalPct').textContent = Math.round(pct)+'%';
+  $('trackFill').style.width = pct+'%';
+  $('trackMarker').style.left = pct+'%';
+  $('goalLine').classList.toggle('done', pct>=100);
+}
+
+function updateState(){
+  const dot=$('dot'), word=$('stateWord');
+  let cls='off', txt='не подключено';
+  if(device && device.gatt.connected){
+    if(paused){ cls='paused'; txt='пауза'; }
+    else if(lastSpeed>0.1){ cls='moving'; txt='идёт · '+lastSpeed.toFixed(1)+' км/ч'; }
+    else { cls='stopped'; txt='стоп'; }
+  }
+  dot.className='status-dot '+cls;
+  word.textContent=txt;
+  $('track').classList.toggle('moving', cls==='moving');
+}
+
+const round1 = v => Math.round(v*10)/10;
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+
+// ==== Цель ====================================================================
+function checkGoal(cur){
+  if(goal && !goalReached && cur>=goal){
+    goalReached=true;
+    toast(`Цель ${fmtSteps(goal)} шагов взята`, true);
+    try{ navigator.vibrate && navigator.vibrate([200,80,200,80,400]); }catch(e){}
+    beep();
+    if($('autoSlow').checked && controlGranted) startSlowdown();
+  }
+}
+function setGoal(v){ goal=v; goalReached=(lastSteps||0)>=v; localStorage.setItem('goal',v); renderGoal(); toast('Цель: '+fmtSteps(v)+' шагов'); }
+
+// ==== День / история =========================================================
+function renderDay(){
+  const s=daily[today()]||0;
+  $('todayNow').textContent = fmtSteps(s)+' шагов';
+  if(dayGoal){
+    const pct=Math.min(100, s/dayGoal*100);
+    $('dayFill').style.width=pct+'%';
+    $('dayGoalTxt').textContent=`Цель дня ${fmtSteps(dayGoal)} · осталось ${fmtSteps(Math.max(0,dayGoal-s))}`;
+    $('dayPct').textContent=Math.round(pct)+'%';
+  } else { $('dayFill').style.width='0%'; $('dayGoalTxt').textContent='Дневная цель не задана'; $('dayPct').textContent=''; }
+}
+function renderHistory(){
+  const el=$('history');
+  if(!sessions.length){ el.innerHTML='<div class="empty">Пока нет завершённых сессий</div>'; return; }
+  el.innerHTML = sessions.slice(0,8).map(s=>
+    `<div class="row"><span>${s.d}</span><span><b>${fmtSteps(s.steps)}</b> шагов · ${(s.dist/1000).toFixed(2)} км · ${fmtTime(s.sec)}</span></div>`
+  ).join('');
+}
+function resetSession(){ sess={ baseSteps:null, prevSteps:null, steps:0, baseDist:null, dist:0, baseSec:null, sec:0, baseKcal:null, kcal:0 }; }
+function saveSession(){
+  if(sess.steps>0){
+    sessions.unshift({ d:today(), steps:sess.steps, dist:sess.dist, sec:sess.sec, kcal:sess.kcal });
+    sessions=sessions.slice(0,30); localStorage.setItem('sessions', JSON.stringify(sessions)); renderHistory();
+  }
+  resetSession();
+}
+function setDayGoal(v){ dayGoal=v; localStorage.setItem('dayGoal',v); renderDay(); toast('Цель дня: '+fmtSteps(v)); }
+
+// ==== BLE =====================================================================
+async function connect(){
+  if(!navigator.bluetooth){ toast('Нужен Chrome, Arc или Edge — в этом браузере нет Web Bluetooth'); return; }
+  try{
+    device = await navigator.bluetooth.requestDevice({ filters:[{services:[FTMS]}], optionalServices:[DEVINFO] });
+    device.addEventListener('gattserverdisconnected', onDisc);
+    server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(FTMS);
+
+    const td = await svc.getCharacteristic(CH_TREADMILL);
+    await td.startNotifications();
+    td.addEventListener('characteristicvaluechanged', e => render(parseTreadmill(e.target.value)));
+
+    try{
+      ctrlChar = await svc.getCharacteristic(CH_CONTROL);
+      await ctrlChar.startNotifications();
+      ctrlChar.addEventListener('characteristicvaluechanged', onCtrlResp);
+    }catch(e){ setCtrl('Control Point недоступен на этой прошивке — только просмотр.','bad'); }
+
+    setConnected(true); updateState(); acquireWake();
+    toast('Подключено');
+  }catch(e){ if(e.name!=='NotFoundError') toast('Не удалось подключиться: '+e.message); }
+}
+function setConnected(on){
+  document.body.classList.toggle('connected', on);
+  $('conn').textContent = on?'Отключить':'Подключить';
+  $('conn').classList.toggle('off', on);
+  if(!on) updateState();
+}
+function onDisc(){
+  controlGranted=false; hasCommanded=false; hasInclCmd=false; paused=false;
+  cancelAuto(); releaseWake(); saveSession(); setConnected(false); updateState();
+  setCtrl('Управление не активировано.'); $('pauseBtn').classList.remove('active'); $('pauseBtn').textContent='Пауза';
+  toast('Дорожка отключилась');
+}
+
+function setCtrl(msg, cls){ const el=$('ctrlStatus'); el.textContent=msg; el.className='ctrl-status'+(cls?' '+cls:''); }
+function onCtrlResp(e){
+  const v=e.target.value;               // 0x80, reqOp, result(0x01=success)
+  if(v.byteLength>=3 && v.getUint8(0)===0x80){
+    const op=v.getUint8(1), ok=v.getUint8(2)===0x01;
+    if(op===OP.REQUEST && ok){ controlGranted=true; setCtrl('Управление активно.','ok'); }
+    else if(!ok) setCtrl('Дорожка отклонила команду (код '+v.getUint8(2)+').','bad');
+  }
+}
+async function ensureControl(){
+  if(!ctrlChar) throw new Error('Control Point недоступен');
+  if(controlGranted) return;
+  await ctrlChar.writeValueWithResponse(new Uint8Array([OP.REQUEST]));
+  await new Promise(r=>setTimeout(r,300));
+}
+async function write(bytes){ await ensureControl(); await ctrlChar.writeValueWithResponse(new Uint8Array(bytes)); }
+
+async function sendSpeed(kmh){
+  hasCommanded=true; kmh=clamp(round1(kmh),1,6);
+  commandedSpeed=kmh; updateTgt();
+  const v=Math.round(kmh*100);
+  await write([OP.SET_SPEED, v&0xff, (v>>8)&0xff]);
+}
+async function sendIncline(pct){
+  hasInclCmd=true; pct=clamp(Math.round(pct),0,9);
+  commandedIncl=pct; updateInclTgt();
+  const v=Math.round(pct*10);
+  await write([OP.SET_INCL, v&0xff, (v>>8)&0xff]);
+}
+async function sendStop(){ cancelAuto(); await write([OP.STOP, STOP_STOP]); }
+async function togglePause(){
+  try{
+    if(paused){ await write([OP.START]); paused=false; $('pauseBtn').textContent='Пауза'; $('pauseBtn').classList.remove('active'); toast('Продолжаем'); }
+    else{ cancelAuto(); await write([OP.STOP, STOP_PAUSE]); paused=true; $('pauseBtn').textContent='Продолжить'; $('pauseBtn').classList.add('active'); toast('Пауза — шаги сохранены'); }
+    updateState();
+  }catch(e){ toast(e.message); }
+}
+
+function updateTgt(){ $('tgt').textContent=commandedSpeed.toFixed(1); $('spdRange').value=commandedSpeed;
+  $('spdDown').disabled = commandedSpeed<=1; $('spdUp').disabled = commandedSpeed>=6; }
+function updateInclTgt(){ $('tgtIncl').textContent=String(commandedIncl);
+  $('inclDown').disabled = commandedIncl<=0; $('inclUp').disabled = commandedIncl>=9; }
+
+// ==== Заминка (настраиваемая) =================================================
+function slowdownCfg(){
+  return {
+    pct: clamp(Number($('sdPct').value)||20, 5, 90),
+    everyMs: Math.max(15, (Number($('sdEvery').value)||1)*60) * 1000,
+    floor: clamp(Number($('sdFloor').value)||1, 1, 5),
+  };
+}
+function cancelSlowdown(){ if(slowdownTimer){ clearInterval(slowdownTimer); slowdownTimer=null; $('sdStatus').textContent=''; } }
+async function startSlowdown(){
+  if(slowdownTimer){ cancelSlowdown(); toast('Заминка остановлена'); return; }
+  try{ await ensureControl(); }catch(e){ toast('Нет управления: '+e.message); return; }
+  const cfg=slowdownCfg();
+  const mins=(cfg.everyMs/60000);
+  $('sdStatus').textContent = `Заминка идёт: −${cfg.pct}% каждые ${mins} мин`;
+  toast('Заминка запущена');
+  const step = async ()=>{
+    const next = round1(commandedSpeed*(1-cfg.pct/100));
+    if(next < cfg.floor){
+      cancelSlowdown();
+      try{ await sendSpeed(cfg.floor); await new Promise(r=>setTimeout(r,1500)); await sendStop(); }catch(e){}
+      $('sdStatus').textContent=''; toast('Заминка завершена — остановлено', true);
+      return;
+    }
+    try{ await sendSpeed(next); $('sdStatus').textContent = `Заминка: ${next.toFixed(1)} км/ч · −${cfg.pct}% каждые ${mins} мин`; }
+    catch(e){ cancelSlowdown(); }
+  };
+  await step();
+  slowdownTimer = setInterval(step, cfg.everyMs);
+}
+
+// ==== Интервальная программа ==================================================
+function saveIv(){ localStorage.setItem('ivProgram', JSON.stringify(ivProgram)); }
+function ivRender(){
+  $('ivRows').innerHTML = ivProgram.map((s,i)=>
+    `<div class="ivrow"><span class="idx">${i+1}</span>`+
+    `<input class="num" data-iv="${i}" data-k="min" type="number" min="0.25" max="60" step="0.25" value="${s.min}"> мин`+
+    `<input class="num" data-iv="${i}" data-k="spd" type="number" min="1" max="6" step="0.1" value="${s.spd}"> км/ч`+
+    `<input class="num" data-iv="${i}" data-k="incl" type="number" min="0" max="9" step="1" value="${s.incl}"> %`+
+    `<button class="rm" data-rm="${i}" aria-label="Удалить">×</button></div>`
+  ).join('');
+  $('ivRows').querySelectorAll('input[data-iv]').forEach(inp=>inp.addEventListener('change', ()=>{
+    ivProgram[+inp.dataset.iv][inp.dataset.k]=Number(inp.value); saveIv();
+  }));
+  $('ivRows').querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click', ()=>{
+    ivProgram.splice(+b.dataset.rm,1); if(!ivProgram.length) ivProgram.push({min:1,spd:3,incl:0}); saveIv(); ivRender();
+  }));
+}
+function ivCancel(){ if(ivTimer){clearTimeout(ivTimer);ivTimer=null;} if(ivTick){clearInterval(ivTick);ivTick=null;} $('ivStat').textContent=''; $('ivStatus').textContent=''; }
+async function ivStart(){
+  if(ivTimer){ ivCancel(); toast('Программа остановлена'); return; }
+  try{ await ensureControl(); }catch(e){ toast('Нет управления: '+e.message); return; }
+  const reps=clamp(Number($('ivReps').value)||1,1,30);
+  const seq=[]; for(let r=0;r<reps;r++) for(const s of ivProgram) seq.push(s);
+  if(!seq.length){ toast('Добавь хотя бы один интервал'); return; }
+  toast('Программа запущена');
+  let idx=0;
+  const runSeg=async()=>{
+    if(idx>=seq.length){ ivCancel(); try{ await sendStop(); }catch(e){} toast('Программа завершена — остановлено', true); return; }
+    const s=seq[idx];
+    try{ await sendSpeed(s.spd); await sendIncline(s.incl); }catch(e){ ivCancel(); toast('Прервано: '+e.message); return; }
+    let left=Math.round(s.min*60);
+    const upd=()=>{ $('ivStat').textContent=`${idx+1}/${seq.length}`;
+      $('ivStatus').textContent=`Интервал ${idx+1}/${seq.length}: ${s.spd.toFixed(1)} км/ч · ${s.incl}% · осталось ${fmtTime(left)}`; };
+    upd(); if(ivTick) clearInterval(ivTick);
+    ivTick=setInterval(()=>{ left=Math.max(0,left-1); upd(); }, 1000);
+    ivTimer=setTimeout(()=>{ idx++; runSeg(); }, s.min*60*1000);
+  };
+  runSeg();
+}
+function cancelAuto(){ cancelSlowdown(); ivCancel(); }
+
+// ==== Утилиты UI ==============================================================
+function toast(msg, good){ const t=$('toast'); t.textContent=msg; t.className='show'+(good?' good':'');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.className='',5500); }
+let audioCtx=null;
+function beep(){ try{
+  audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination); o.type='sine'; o.frequency.value=880;
+  g.gain.setValueAtTime(.001,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(.3,audioCtx.currentTime+.02);
+  g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+.6); o.start(); o.stop(audioCtx.currentTime+.6);
+}catch(e){} }
+
+// Экран не должен гаснуть во время ходьбы
+async function acquireWake(){ try{ if('wakeLock' in navigator) wakeLock=await navigator.wakeLock.request('screen'); }catch(e){} }
+function releaseWake(){ try{ wakeLock&&wakeLock.release(); }catch(e){} wakeLock=null; }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && device && device.gatt.connected && !wakeLock) acquireWake(); });
+
+const errToast = p => p.catch(e=>toast(e.message));
+function userSpeed(v){ cancelAuto(); return errToast(sendSpeed(v)); }
+
+// ==== События =================================================================
+$('conn').addEventListener('click', ()=>{ device&&device.gatt.connected ? device.gatt.disconnect() : connect(); });
+$('setGoal').addEventListener('click', ()=>{ const v=parseInt($('goalInput').value,10); if(v>0) setGoal(v); });
+$('goalInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ const v=parseInt($('goalInput').value,10); if(v>0) setGoal(v); } });
+$('clrGoal').addEventListener('click', ()=>{ goal=null; goalReached=false; localStorage.removeItem('goal'); $('goalInput').value=''; renderGoal(); });
+document.querySelectorAll('.chip[data-g]').forEach(c=>c.addEventListener('click', ()=>{ $('goalInput').value=c.dataset.g; setGoal(parseInt(c.dataset.g,10)); }));
+
+$('spdUp').addEventListener('click', ()=>userSpeed(commandedSpeed+0.1));
+$('spdDown').addEventListener('click', ()=>userSpeed(commandedSpeed-0.1));
+$('spdRange').addEventListener('change', e=>userSpeed(parseFloat(e.target.value)));
+document.querySelectorAll('.chip[data-s]').forEach(c=>c.addEventListener('click', ()=>userSpeed(parseFloat(c.dataset.s))));
+
+$('inclUp').addEventListener('click', ()=>errToast(sendIncline(commandedIncl+1)));
+$('inclDown').addEventListener('click', ()=>errToast(sendIncline(commandedIncl-1)));
+document.querySelectorAll('.chip[data-i]').forEach(c=>c.addEventListener('click', ()=>errToast(sendIncline(parseInt(c.dataset.i,10)))));
+
+$('pauseBtn').addEventListener('click', togglePause);
+$('stopBtn').addEventListener('click', ()=>errToast(sendStop()));
+$('slowBtn').addEventListener('click', startSlowdown);
+
+['sdPct','sdEvery','sdFloor'].forEach(id=>$(id).addEventListener('change', ()=>{
+  localStorage.setItem('sd_'+id, $(id).value);
+}));
+
+$('ivAdd').addEventListener('click', ()=>{ ivProgram.push({min:1,spd:3,incl:0}); saveIv(); ivRender(); });
+$('ivStart').addEventListener('click', ivStart);
+$('dayGoalSet').addEventListener('click', ()=>{ const v=parseInt($('dayGoalInput').value,10); if(v>0) setDayGoal(v); });
+$('dayGoalInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ const v=parseInt($('dayGoalInput').value,10); if(v>0) setDayGoal(v); } });
+
+// ==== Init ====================================================================
+['sdPct','sdEvery','sdFloor'].forEach(id=>{ const v=localStorage.getItem('sd_'+id); if(v!=null) $(id).value=v; });
+if(goal) $('goalInput').value=goal;
+if(dayGoal) $('dayGoalInput').value=dayGoal;
+ivRender(); renderDay(); renderHistory();
+renderGoal(); updateTgt(); updateInclTgt(); updateState();
+</script>
+</body>
+</html>

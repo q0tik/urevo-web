@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Urevo BLE — разведчик</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    font: 15px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #0e1116; color: #d7dde5;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8b95a4; font-size: 13px; margin: 0 0 16px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; position: sticky; top: 0;
+         background: #0e1116; padding: 8px 0; z-index: 10; }
+  button {
+    font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 10px;
+    border: 1px solid #2a3444; background: #182030; color: #d7dde5; cursor: pointer;
+  }
+  button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  button:active { transform: translateY(1px); }
+  #status { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: #131a24;
+            border: 1px solid #222c3a; font-size: 13px; }
+  #status.ok { border-color: #1f7a3d; }
+  #status.err { border-color: #a1352f; color: #ffb3ad; }
+  .svc { border: 1px solid #222c3a; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .svc > .h { background: #151d29; padding: 8px 12px; font-weight: 700; }
+  .chr { padding: 6px 12px; border-top: 1px solid #1a2331; }
+  .chr .u { color: #9fb4d6; }
+  .chr .p { color: #7d8899; font-size: 12px; }
+  .chr .v { color: #7bd88f; white-space: pre-wrap; word-break: break-all; }
+  #log {
+    margin-top: 16px; background: #0a0d12; border: 1px solid #1a2331; border-radius: 10px;
+    padding: 10px 12px; height: 40vh; overflow-y: auto; font-size: 12.5px; white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .t { color: #566072; }
+  .name { color: #e0c56e; }
+  .hex { color: #7bd88f; }
+  .decoded { color: #86b5ff; }
+  a { color: #6ea8ff; }
+</style>
+</head>
+<body>
+  <h1>Urevo BLE — разведчик</h1>
+  <p class="sub">Подключись к дорожке, пройдись немного. Внизу копится лог. Кнопкой «Скопировать лог» отправь результат — по нему настроим приложение.</p>
+
+  <div class="bar">
+    <button id="connect" class="primary">Подключить дорожку</button>
+    <button id="disconnect" disabled>Отключить</button>
+    <button id="copy">Скопировать лог</button>
+    <button id="clear">Очистить</button>
+  </div>
+
+  <div id="status">Готов. Chrome на Android или десктопе. Дорожка должна быть включена и НЕ подключена к родному приложению.</div>
+
+  <div id="tree"></div>
+  <div id="log"></div>
+
+<script>
+"use strict";
+
+// ---- Список сервисов, к которым просим доступ. -------------------------------
+// Web Bluetooth даёт доступ ТОЛЬКО к заранее перечисленным сервисам, поэтому
+// список широкий: стандартные фитнес-сервисы + типовые проприетарные UUID'ы
+// беговых дорожек / walking pad.
+const KNOWN_SERVICES = [
+  0x1826, // Fitness Machine Service (FTMS) — главный кандидат
+  0x1816, // Cycling Speed and Cadence
+  0x1818, // Cycling Power
+  0x180d, // Heart Rate
+  0x180a, // Device Information
+  0x180f, // Battery
+  0x1800, // Generic Access
+  0x1801, // Generic Attribute
+  0xfe00, 0xff00, 0xffe0, 0xffe5, 0xfff0, 0xfee7,
+  "0000fe00-0000-1000-8000-00805f9b34fb", // Kingsmith / WalkingPad
+  "00010203-0405-0607-0809-0a0b0c0d1912", // некоторые дорожки
+  "6e400001-b5a3-f393-e0a9-e50e24dcca9e", // Nordic UART Service
+  "0000ffe0-0000-1000-8000-00805f9b34fb",
+  "0000fff0-0000-1000-8000-00805f9b34fb",
+];
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const treeEl = $("tree");
+const logEl = $("log");
+
+let device = null;
+const subscribed = [];
+
+function setStatus(msg, cls) {
+  statusEl.textContent = msg;
+  statusEl.className = cls || "";
+}
+
+function pad2(n) { return n.toString(16).padStart(2, "0"); }
+function toHex(dv) {
+  const out = [];
+  for (let i = 0; i < dv.byteLength; i++) out.push(pad2(dv.getUint8(i)));
+  return out.join(" ");
+}
+
+// Отметка времени без Date.now-зависимостей запрещённых в скриптах — тут обычный
+// браузер, performance.now доступен.
+function ts() {
+  const s = performance.now() / 1000;
+  return s.toFixed(2).padStart(8, " ");
+}
+
+function log(parts) {
+  // parts: массив [{t:'class', s:'text'}] или строка
+  const line = document.createElement("div");
+  const time = document.createElement("span");
+  time.className = "t";
+  time.textContent = ts() + "  ";
+  line.appendChild(time);
+  if (typeof parts === "string") {
+    line.appendChild(document.createTextNode(parts));
+  } else {
+    for (const p of parts) {
+      const span = document.createElement("span");
+      span.className = p.t || "";
+      span.textContent = p.s;
+      line.appendChild(span);
+    }
+  }
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- Разбор стандартной FTMS Treadmill Data (0x2ACD) -------------------------
+// По спецу первое поле — 16-битные флаги, дальше поля идут в фиксированном
+// порядке, каждое присутствует в зависимости от бита флага.
+function parseTreadmillData(dv) {
+  try {
+    let i = 0;
+    const flags = dv.getUint16(i, true); i += 2;
+    const out = [];
+    // Instantaneous Speed присутствует ВСЕГДА (бит "more data" = 0), uint16, 0.01 km/h
+    const speed = dv.getUint16(i, true) / 100; i += 2;
+    out.push(`speed=${speed.toFixed(2)}km/h`);
+    if (flags & 0x0002) { const avg = dv.getUint16(i, true) / 100; i += 2; out.push(`avgSpeed=${avg.toFixed(2)}`); }
+    if (flags & 0x0004) { // Total Distance, uint24, meters
+      const d = dv.getUint8(i) | (dv.getUint8(i+1) << 8) | (dv.getUint8(i+2) << 16); i += 3;
+      out.push(`dist=${d}m`);
+    }
+    if (flags & 0x0008) { const inc = dv.getInt16(i, true)/10; i+=2; const ramp = dv.getInt16(i,true)/10; i+=2; out.push(`incline=${inc}% ramp=${ramp}`); }
+    if (flags & 0x0010) { i += 3; out.push("posElev+negElev"); }
+    if (flags & 0x0020) { const pace = dv.getUint16(i,true); i+=2; out.push(`pace=${pace}`); }
+    if (flags & 0x0040) { i += 2; out.push("avgPace"); }
+    if (flags & 0x0080) { const kcal = dv.getUint16(i,true); i+=2; out.push(`kcal=${kcal}`); }
+    if (flags & 0x0100) { const hr = dv.getUint8(i); i+=1; out.push(`hr=${hr}`); }
+    if (flags & 0x0200) { i += 1; out.push("metEquiv"); }
+    if (flags & 0x0400) { const el = dv.getUint16(i,true); i+=2; out.push(`elapsed=${el}s`); }
+    if (flags & 0x0800) { const rem = dv.getUint16(i,true); i+=2; out.push(`remaining=${rem}s`); }
+    return `[FTMS treadmill] flags=0x${flags.toString(16).padStart(4,"0")} ` + out.join(" ");
+  } catch (e) {
+    return "[FTMS treadmill parse error: " + e.message + "]";
+  }
+}
+
+function uuidShort(uuid) {
+  // "0000180a-0000-1000-8000-00805f9b34fb" -> "0x180a"
+  const m = /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.exec(uuid);
+  return m ? "0x" + m[1] : uuid;
+}
+
+function propsOf(c) {
+  const p = c.properties, arr = [];
+  if (p.read) arr.push("read");
+  if (p.write) arr.push("write");
+  if (p.writeWithoutResponse) arr.push("writeNR");
+  if (p.notify) arr.push("notify");
+  if (p.indicate) arr.push("indicate");
+  return arr.join(",") || "—";
+}
+
+async function explore() {
+  treeEl.innerHTML = "";
+  const services = await device.gatt.getPrimaryServices();
+  log([{t:"name", s:`Найдено сервисов: ${services.length}`}]);
+
+  for (const svc of services) {
+    const box = document.createElement("div");
+    box.className = "svc";
+    const head = document.createElement("div");
+    head.className = "h";
+    head.textContent = "service " + uuidShort(svc.uuid) + "  (" + svc.uuid + ")";
+    box.appendChild(head);
+
+    let chars = [];
+    try { chars = await svc.getCharacteristics(); }
+    catch (e) { log(`  не смог прочитать характеристики ${svc.uuid}: ${e.message}`); }
+
+    for (const c of chars) {
+      const row = document.createElement("div");
+      row.className = "chr";
+      const short = uuidShort(c.uuid);
+      row.innerHTML = `<span class="u">${short}</span> <span class="p">[${propsOf(c)}]</span>`;
+      box.appendChild(row);
+
+      // Пробуем прочитать read-характеристики один раз.
+      if (c.properties.read) {
+        try {
+          const v = await c.readValue();
+          const hex = toHex(v);
+          const dec = new TextDecoder().decode(v).replace(/[^\x20-\x7e]/g, "·");
+          const vEl = document.createElement("div");
+          vEl.className = "v";
+          vEl.textContent = `  = ${hex}   "${dec}"`;
+          row.appendChild(vEl);
+          log([{t:"name", s:`READ ${short} `}, {t:"hex", s:hex}]);
+        } catch (e) { /* некоторые read падают — не страшно */ }
+      }
+
+      // Подписываемся на все notify/indicate — тут и польётся телеметрия.
+      if (c.properties.notify || c.properties.indicate) {
+        try {
+          await c.startNotifications();
+          subscribed.push(c);
+          const isTreadmill = short === "0x2acd";
+          c.addEventListener("characteristicvaluechanged", (ev) => {
+            const dv = ev.target.value;
+            const hex = toHex(dv);
+            const parts = [{t:"name", s:`NOTIF ${short} `}, {t:"hex", s:hex}];
+            if (isTreadmill) parts.push({t:"decoded", s:"  " + parseTreadmillData(dv)});
+            log(parts);
+          });
+          log([{t:"name", s:`SUBSCRIBED ${short}`}]);
+        } catch (e) {
+          log(`  подписка на ${short} не удалась: ${e.message}`);
+        }
+      }
+    }
+    treeEl.appendChild(box);
+  }
+  log([{t:"decoded", s:"— Готово. Теперь походи 1–2 минуты, поменяй скорость с родного пульта/приложения и последи за NOTIF. —"}]);
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    setStatus("В этом браузере нет Web Bluetooth. Нужен Chrome (Android/десктоп).", "err");
+    return;
+  }
+  try {
+    setStatus("Открываю список устройств…");
+    device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: KNOWN_SERVICES,
+    });
+    log([{t:"name", s:`Устройство: ${device.name || "(без имени)"}  id=${device.id}`}]);
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    setStatus("Подключаюсь к GATT…");
+    await device.gatt.connect();
+    setStatus(`Подключено к ${device.name || "устройству"}. Разбираю сервисы…`, "ok");
+    $("connect").disabled = true;
+    $("disconnect").disabled = false;
+
+    await explore();
+  } catch (e) {
+    setStatus("Ошибка: " + e.message, "err");
+    log("ОШИБКА: " + e.message);
+  }
+}
+
+function onDisconnected() {
+  setStatus("Дорожка отключилась.", "err");
+  $("connect").disabled = false;
+  $("disconnect").disabled = true;
+  log([{t:"name", s:"— disconnected —"}]);
+}
+
+async function disconnect() {
+  for (const c of subscribed) { try { await c.stopNotifications(); } catch (e) {} }
+  subscribed.length = 0;
+  if (device && device.gatt.connected) device.gatt.disconnect();
+}
+
+$("connect").addEventListener("click", connect);
+$("disconnect").addEventListener("click", disconnect);
+$("clear").addEventListener("click", () => { logEl.innerHTML = ""; });
+$("copy").addEventListener("click", async () => {
+  const text = logEl.innerText;
+  try { await navigator.clipboard.writeText(text); setStatus("Лог скопирован в буфер.", "ok"); }
+  catch (e) {
+    // fallback: выделяем
+    const r = document.createRange(); r.selectNode(logEl);
+    getSelection().removeAllRanges(); getSelection().addRange(r);
+    setStatus("Не смог в буфер — лог выделен, скопируй вручную.", "err");
+  }
+});
+</script>
+</body>
+</html>
