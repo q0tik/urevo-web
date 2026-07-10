@@ -11,11 +11,10 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, macos, urevo-web]
+    runs-on: [self-hosted, linux, urevo-web]
     steps:
       - name: Pull & rebuild container
         run: |
-          # launchd даёт урезанный PATH — docker (Docker Desktop) в /usr/local/bin, git в /usr/bin
           export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH
           cd ~/Services/urevo-web
           git fetch --all
